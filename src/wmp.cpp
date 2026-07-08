@@ -190,6 +190,56 @@ std::tuple<double, double, double> WindowedMultipole::evaluate(
   return std::make_tuple(sig_s, sig_a, sig_f);
 }
 
+vector<double> WindowedMultipole::evaluate_pseudo(double E, double sqrtkT) const
+{
+  using namespace std::complex_literals;
+
+  if (!has_pseudo_data_)
+    return {};
+
+  // Define some frequently used variables.
+  double sqrtE = std::sqrt(E);
+  double invE = 1.0 / E;
+
+  // Locate window containing energy
+  int i_window = std::min(window_info_.size() - 1,
+    static_cast<size_t>((sqrtE - std::sqrt(E_min_)) * inv_spacing_));
+  const auto& window {window_info_[i_window]};
+
+  int n_moments = pseudo_data_.shape()[1] - 1;
+  vector<double> moments(n_moments, 0.0);
+
+  // Windows are not required to contain any pseudopoles.
+  if (window.pseudo_index_start < 0)
+    return moments;
+
+  if (sqrtkT == 0.0) {
+    // If at 0K, use asymptotic form.
+    for (int i_pole = window.pseudo_index_start;
+         i_pole <= window.pseudo_index_end; ++i_pole) {
+      std::complex<double> psi_chi =
+        -1.0i / (pseudo_data_(i_pole, 0) - sqrtE);
+      std::complex<double> c_temp = psi_chi * invE;
+      for (int i_mom = 0; i_mom < n_moments; ++i_mom) {
+        moments[i_mom] += (pseudo_data_(i_pole, i_mom + 1) * c_temp).real();
+      }
+    }
+  } else {
+    // At temperature, use Faddeeva function-based form.
+    double dopp = sqrt_awr_ / sqrtkT;
+    for (int i_pole = window.pseudo_index_start;
+         i_pole <= window.pseudo_index_end; ++i_pole) {
+      std::complex<double> z = (sqrtE - pseudo_data_(i_pole, 0)) * dopp;
+      std::complex<double> w_val = faddeeva(z) * dopp * invE * SQRT_PI;
+      for (int i_mom = 0; i_mom < n_moments; ++i_mom) {
+        moments[i_mom] += (pseudo_data_(i_pole, i_mom + 1) * w_val).real();
+      }
+    }
+  }
+
+  return moments;
+}
+
 std::tuple<double, double, double> WindowedMultipole::evaluate_deriv(
   double E, double sqrtkT) const
 {

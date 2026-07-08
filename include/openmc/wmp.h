@@ -71,6 +71,18 @@ public:
   std::tuple<double, double, double> evaluate_deriv(
     double E, double sqrtkT) const;
 
+  //! \brief Evaluate Doppler-broadened Legendre moments from pseudopole data
+  //!
+  //! Uses the same asymptotic (0K) / Faddeeva-function (T>0) forms as the
+  //! physical poles in evaluate(), applied to each pseudopole residue
+  //! channel (e.g. sigma_0, sigma_1, sigma_2, ... angular moments).
+  //!
+  //! \param E Incident neutron energy in [eV]
+  //! \param sqrtkT Square root of temperature times Boltzmann constant
+  //! \return Vector of Legendre moment values, one per residue channel in
+  //!         pseudo_data_. Empty if this nuclide has no pseudopole data.
+  vector<double> evaluate_pseudo(double E, double sqrtkT) const;
+
   // Data members
   std::string name_;               //!< Name of nuclide
   double E_min_;                   //!< Minimum energy in [eV]
