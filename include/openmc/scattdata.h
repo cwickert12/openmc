@@ -74,7 +74,7 @@ public:
   //! @param coeffs Input sparse scattering matrix
   virtual void init(const xt::xtensor<int, 1>& in_gmin,
     const xt::xtensor<int, 1>& in_gmax, const double_2dvec& in_mult,
-    const double_3dvec& coeffs) = 0;
+    const double_3dvec& coeffs, const double_2dvec& legendre_out) = 0;
 
   //! \brief Combines the microscopic data.
   //!
@@ -128,6 +128,8 @@ class ScattDataLegendre : public ScattData {
 protected:
   // Maximal value for rejection sampling from a rectangle
   double_2dvec max_val;
+  // Legendre exapnsion values
+  double_2dvec legendre_out_;
 
   // Friend convert_legendre_to_tabular so it has access to protected
   // parameters
@@ -137,7 +139,7 @@ protected:
 public:
   void init(const xt::xtensor<int, 1>& in_gmin,
     const xt::xtensor<int, 1>& in_gmax, const double_2dvec& in_mult,
-    const double_3dvec& coeffs) override;
+    const double_3dvec& coeffs, const double_2dvec& legendre_out) override;
 
   void combine(const vector<ScattData*>& those_scatts,
     const vector<double>& scalars) override;
@@ -167,11 +169,12 @@ protected:
   xt::xtensor<double, 1> mu; // Angle distribution mu bin boundaries
   double dmu;                // Quick storage of the mu spacing
   double_3dvec fmu;          // The angular distribution histogram
+  double_2dvec legendre_out_;
 
 public:
   void init(const xt::xtensor<int, 1>& in_gmin,
     const xt::xtensor<int, 1>& in_gmax, const double_2dvec& in_mult,
-    const double_3dvec& coeffs) override;
+    const double_3dvec& coeffs, const double_2dvec& legendre_out) override;
 
   void combine(const vector<ScattData*>& those_scatts,
     const vector<double>& scalars) override;
@@ -197,6 +200,7 @@ protected:
   xt::xtensor<double, 1> mu; // Angle distribution mu grid points
   double dmu;                // Quick storage of the mu spacing
   double_3dvec fmu;          // The angular distribution function
+  double_2dvec legendre_out_;
 
   // Friend convert_legendre_to_tabular so it has access to protected
   // parameters
@@ -206,7 +210,7 @@ protected:
 public:
   void init(const xt::xtensor<int, 1>& in_gmin,
     const xt::xtensor<int, 1>& in_gmax, const double_2dvec& in_mult,
-    const double_3dvec& coeffs) override;
+    const double_3dvec& coeffs, const double_2dvec& legendre_out) override;
 
   void combine(const vector<ScattData*>& those_scatts,
     const vector<double>& scalars) override;

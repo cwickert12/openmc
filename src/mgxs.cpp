@@ -49,6 +49,7 @@ void Mgxs::init(const std::string& in_name, double in_awr,
 void Mgxs::metadata_from_hdf5(hid_t xs_id, const vector<double>& temperature,
   vector<int>& temps_to_read, int& order_dim)
 {
+
   // get name
   std::string in_name;
   get_name(xs_id, in_name);

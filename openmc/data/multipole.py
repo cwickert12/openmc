@@ -1184,12 +1184,16 @@ class WindowedMultipole(EqualityMixin):
         # ======================================================================
         # Add the contribution from the curvefit polynomial.
 
+        
+
         if sqrtkT != 0 and self.broaden_poly[i_window]:
             # Broaden the curvefit.
             dopp = self.sqrtAWR / sqrtkT
             broadened_polynomials = _broaden_wmp_polynomials(E, dopp,
                                                              self.fit_order + 1)
             for i_poly in range(self.fit_order + 1):
+                print(self.curvefit[i_window,i_poly, _FIT_S])
+                print(self.curvefit[i_window,i_poly, _FIT_A])
                 sig_s += (self.curvefit[i_window, i_poly, _FIT_S]
                           * broadened_polynomials[i_poly])
                 sig_a += (self.curvefit[i_window, i_poly, _FIT_A]

@@ -12,6 +12,7 @@
 #include "openmc/math_functions.h"
 #include "openmc/random_lcg.h"
 #include "openmc/settings.h"
+#include <iostream>
 
 namespace openmc {
 
@@ -52,6 +53,7 @@ void ScattData::base_init(int order, const xt::xtensor<int, 1>& in_gmin,
     }
 
     // Initialize the distribution data
+
     dist[gin].resize(in_gmax[gin] - in_gmin[gin] + 1);
     for (auto& v : dist[gin]) {
       v.resize(order);
@@ -229,10 +231,12 @@ double ScattData::get_xs(
 
 void ScattDataLegendre::init(const xt::xtensor<int, 1>& in_gmin,
   const xt::xtensor<int, 1>& in_gmax, const double_2dvec& in_mult,
-  const double_3dvec& coeffs)
+  const double_3dvec& coeffs, const double_2dvec& legendre_out)
 {
   size_t groups = coeffs.size();
   size_t order = coeffs[0][0].size();
+
+  legendre_out_ = legendre_out;
 
   // make a copy of coeffs that we can use to both extract data and normalize
   double_3dvec matrix = coeffs;
@@ -246,7 +250,7 @@ void ScattDataLegendre::init(const xt::xtensor<int, 1>& in_gmin,
       scattxs[gin] += matrix[gin][i_gout][0];
     }
   }
-
+  
   // Build the energy transfer matrix from data in the variable matrix while
   // also normalizing the variable matrix itself
   // (forcing the CDF of f(mu=1) == 1)
@@ -275,7 +279,8 @@ void ScattDataLegendre::init(const xt::xtensor<int, 1>& in_gmin,
     for (int i_gout = 0; i_gout < num_groups; i_gout++) {
       dist[gin][i_gout] = matrix[gin][i_gout];
     }
-    max_val[gin].resize(num_groups);
+  //  max_val[gin].resize(num_groups);
+    max_val[gin].resize(1);
     for (auto& n : max_val[gin])
       n = 0.;
   }
@@ -285,12 +290,12 @@ void ScattDataLegendre::init(const xt::xtensor<int, 1>& in_gmin,
 }
 
 //==============================================================================
-
 void ScattDataLegendre::update_max_val()
 {
   size_t groups = max_val.size();
   // Step through the polynomial with fixed number of points to identify the
   // maximal value
+  /** 
   int Nmu = 1001;
   double dmu = 2. / (Nmu - 1);
   for (int gin = 0; gin < groups; gin++) {
@@ -307,19 +312,47 @@ void ScattDataLegendre::update_max_val()
         }
 
         // Calculate probability
+        //double f = evaluate_legendre(
+          //dist[gin][i_gout].size() - 1, dist[gin][i_gout].data(), mu);
         double f = evaluate_legendre(
-          dist[gin][i_gout].size() - 1, dist[gin][i_gout].data(), mu);
+          legendre_out_(i_gout+gmin[gin]).size() - 1, legendre_out_(i_gout+gmin[gin]).data(), mu);
 
         // if this is a new maximum, store it
         if (f > max_val[gin][i_gout])
           max_val[gin][i_gout] = f;
       } // end imu loop
+       */
+  int Nmu = 1001;
+  double dmu = 2. / (Nmu - 1);
+  for (int gout = 0; gout < groups; gout++) {
+    auto row = legendre_out_[gout];
+    // std::cout << gout << " " << row[0] << " " << row[1] << "\n";
+    for (int imu = 0; imu < Nmu; imu++) {
+      double mu;
+      if (imu == 0) {
+        mu = -1.;
+      } else if (imu == (Nmu - 1)) {
+        mu = 1.;
+      } else {
+        mu = -1. + (imu - 1) * dmu;
+      }
 
-      // Since we may not have caught the true max, add 10% margin
-      max_val[gin][i_gout] *= 1.1;
+      // Calculate probability
+      //double f = evaluate_legendre(
+        //dist[gin][i_gout].size() - 1, dist[gin][i_gout].data(), mu);
+
+      double f = evaluate_legendre(row.size() - 1, row.data(), mu);
+
+      // if this is a new maximum, store it
+      if (f > max_val[gout][0])
+        max_val[gout][0] = f;
+    } // end imu loop
+
+    // Since we may not have caught the true max, add 10% margin
+    // max_val[i_gout][0] *= 1.1;
+    max_val[gout][0] *= 1.1;
     }
   }
-}
 
 //==============================================================================
 
@@ -329,9 +362,12 @@ double ScattDataLegendre::calc_f(int gin, int gout, double mu)
   if ((gout < gmin[gin]) || (gout > gmax[gin])) {
     f = 0.;
   } else {
-    int i_gout = gout - gmin[gin];
-    f = evaluate_legendre(
-      dist[gin][i_gout].size() - 1, dist[gin][i_gout].data(), mu);
+    //int i_gout = gout - gmin[gin];
+    //f = evaluate_legendre(
+    //  dist[gin][i_gout].size() - 1, dist[gin][i_gout].data(), mu);
+
+    auto row = legendre_out_[gout];
+    f = evaluate_legendre(row.size() - 1, row.data(), mu);
   }
   return f;
 }
@@ -347,11 +383,14 @@ void ScattDataLegendre::sample(
 
   // Now we can sample mu using the scattering kernel using rejection
   // sampling from a rectangular bounding box
-  double M = max_val[gin][i_gout];
+  //double M = max_val[gin][i_gout];
+  double M = max_val[gout][0];
+
   int samples;
   for (samples = 0; samples < MAX_SAMPLE; ++samples) {
     mu = 2. * prn(seed) - 1.;
     double f = calc_f(gin, gout, mu);
+
     if (f > 0.) {
       double u = prn(seed) * M;
       if (u <= f)
@@ -390,7 +429,8 @@ void ScattDataLegendre::combine(
   xt::xtensor<int, 1> in_gmax({groups}, 0);
   double_3dvec sparse_scatter(groups);
   double_2dvec sparse_mult(groups);
-
+  double_2dvec combined_legendre_out = 
+    dynamic_cast<ScattDataLegendre*>(those_scatts[0])->legendre_out_;
   // The rest of the steps do not depend on the type of angular representation
   // so we use a base class method to sum up xs and create new energy and mult
   // matrices
@@ -399,7 +439,7 @@ void ScattDataLegendre::combine(
     in_gmax, sparse_mult, sparse_scatter);
 
   // Got everything we need, store it.
-  init(in_gmin, in_gmax, sparse_mult, sparse_scatter);
+  init(in_gmin, in_gmax, sparse_mult, sparse_scatter, combined_legendre_out);
 }
 
 //==============================================================================
@@ -429,11 +469,12 @@ xt::xtensor<double, 3> ScattDataLegendre::get_matrix(size_t max_order)
 
 void ScattDataHistogram::init(const xt::xtensor<int, 1>& in_gmin,
   const xt::xtensor<int, 1>& in_gmax, const double_2dvec& in_mult,
-  const double_3dvec& coeffs)
+  const double_3dvec& coeffs, const double_2dvec& legendre_out)
 {
   size_t groups = coeffs.size();
   size_t order = coeffs[0][0].size();
 
+  legendre_out_ = legendre_out;
   // make a copy of coeffs that we can use to both extract data and normalize
   double_3dvec matrix = coeffs;
 
@@ -613,7 +654,7 @@ void ScattDataHistogram::combine(
     in_gmax, sparse_mult, sparse_scatter);
 
   // Got everything we need, store it.
-  init(in_gmin, in_gmax, sparse_mult, sparse_scatter);
+  init(in_gmin, in_gmax, sparse_mult, sparse_scatter, legendre_out_);
 }
 
 //==============================================================================
@@ -622,11 +663,12 @@ void ScattDataHistogram::combine(
 
 void ScattDataTabular::init(const xt::xtensor<int, 1>& in_gmin,
   const xt::xtensor<int, 1>& in_gmax, const double_2dvec& in_mult,
-  const double_3dvec& coeffs)
+  const double_3dvec& coeffs, const double_2dvec& legendre_out)
 {
   size_t groups = coeffs.size();
   size_t order = coeffs[0][0].size();
 
+  legendre_out_ = legendre_out;
   // make a copy of coeffs that we can use to both extract data and normalize
   double_3dvec matrix = coeffs;
 
@@ -829,7 +871,7 @@ void ScattDataTabular::combine(
     in_gmax, sparse_mult, sparse_scatter);
 
   // Got everything we need, store it.
-  init(in_gmin, in_gmax, sparse_mult, sparse_scatter);
+  init(in_gmin, in_gmax, sparse_mult, sparse_scatter, legendre_out_);
 }
 
 //==============================================================================

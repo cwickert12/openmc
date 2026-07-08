@@ -447,6 +447,23 @@ void XsData::scatter_from_hdf5(hid_t xsdata_grp, size_t n_ang,
     }
   }
 
+  // Get outgoing group legendre data 
+  xt::xtensor<double, 2> legendre_out({n_g_, order_dim});
+  read_nd_vector(scatt_grp, "LegendreOut", legendre_out, true);
+  
+  for (size_t g = 0; g < n_g_; g++) {
+    for (size_t l = 0; l < order_dim; l++) {
+    }
+  }
+  
+  // Convert to double_2dvec for init
+  double_2dvec legendre_out_(n_g_, std::vector<double>(order_dim));
+  for (size_t g = 0; g < n_g_; g++) {
+    for (size_t l = 0; l < order_dim; l++) {
+      legendre_out_[g][l] = legendre_out(g, l);
+    }
+  }
+
   // Get multiplication matrix
   double_3dvec temp_mult(n_ang, double_2dvec(n_g_));
   if (object_exists(scatt_grp, "multiplicity_matrix")) {
@@ -484,7 +501,7 @@ void XsData::scatter_from_hdf5(hid_t xsdata_grp, size_t n_ang,
       xt::xtensor<int, 1> in_gmin = xt::view(gmin, a, xt::all());
       xt::xtensor<int, 1> in_gmax = xt::view(gmax, a, xt::all());
 
-      legendre_scatt.init(in_gmin, in_gmax, temp_mult[a], input_scatt[a]);
+      legendre_scatt.init(in_gmin, in_gmax, temp_mult[a], input_scatt[a], legendre_out_);
 
       // Now create a tabular version of legendre_scatt
       convert_legendre_to_tabular(
@@ -498,7 +515,8 @@ void XsData::scatter_from_hdf5(hid_t xsdata_grp, size_t n_ang,
     for (size_t a = 0; a < n_ang; a++) {
       xt::xtensor<int, 1> in_gmin = xt::view(gmin, a, xt::all());
       xt::xtensor<int, 1> in_gmax = xt::view(gmax, a, xt::all());
-      scatter[a]->init(in_gmin, in_gmax, temp_mult[a], input_scatt[a]);
+      
+      scatter[a]->init(in_gmin, in_gmax, temp_mult[a], input_scatt[a], legendre_out_);
     }
   }
 }

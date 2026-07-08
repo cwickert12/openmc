@@ -415,6 +415,7 @@ void read_settings_xml(pugi::xml_node root)
   // Find if a multi-group or continuous-energy simulation is desired
   if (check_for_node(root, "energy_mode")) {
     std::string temp_str = get_node_value(root, "energy_mode", true, true);
+    
     if (temp_str == "mg" || temp_str == "multi-group") {
       run_CE = false;
     } else if (temp_str == "ce" || temp_str == "continuous-energy") {
