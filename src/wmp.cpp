@@ -38,11 +38,22 @@ WindowedMultipole::WindowedMultipole(hid_t group)
   // Check to see if this data includes fission residues.
   fissionable_ = (n_residues == 3);
 
+  // Read the "pseudo_data" array, if present. This holds pseudopoles and
+  // residues (e.g. angular moment fits) alongside the physical poles in
+  // "data".
+  has_pseudo_data_ = object_exists(group, "pseudo_data");
+  if (has_pseudo_data_) {
+    read_dataset(group, "pseudo_data", pseudo_data_);
+  }
+
   // Read the "windows" array and use its shape to figure out the number of
-  // windows.
+  // windows. When pseudo_data is present, windows has 4 columns
+  // (pole_start, pole_end, pseudo_start, pseudo_end); otherwise 2
+  // (pole_start, pole_end).
   xt::xtensor<int, 2> windows;
   read_dataset(group, "windows", windows);
   int n_windows = windows.shape()[0];
+  bool has_pseudo_windows = windows.shape()[1] >= 4;
   windows -= 1; // Adjust to 0-based indices
 
   // Read the "broaden_poly" arrays.
@@ -63,6 +74,12 @@ WindowedMultipole::WindowedMultipole(hid_t group)
   }
   fit_order_ = curvefit_.shape()[1] - 1;
 
+  // pseudo_data and the 4-column form of windows must appear together.
+  if (has_pseudo_data_ != has_pseudo_windows) {
+    fatal_error("WMP library for " + name_ +
+                " has pseudo_data without 4-column windows, or vice versa.");
+  }
+
   // Check the code is compiling to work with sufficiently high fit order
   if (fit_order_ + 1 > MAX_POLY_COEFFICIENTS) {
     fatal_error(fmt::format(
@@ -76,6 +93,13 @@ WindowedMultipole::WindowedMultipole(hid_t group)
     window_info_[i].index_start = windows(i, 0);
     window_info_[i].index_end = windows(i, 1);
     window_info_[i].broaden_poly = broaden_poly[i];
+    if (has_pseudo_windows) {
+      window_info_[i].pseudo_index_start = windows(i, 2);
+      window_info_[i].pseudo_index_end = windows(i, 3);
+    } else {
+      window_info_[i].pseudo_index_start = -1;
+      window_info_[i].pseudo_index_end = -1;
+    }
   }
 }
 

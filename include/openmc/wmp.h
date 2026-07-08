@@ -39,9 +39,11 @@ class WindowedMultipole {
 public:
   // Types
   struct WindowInfo {
-    int index_start;   // Index of starting pole
-    int index_end;     // Index of ending pole
-    bool broaden_poly; // Whether to broaden polynomial curvefit
+    int index_start;        // Index of starting pole
+    int index_end;          // Index of ending pole
+    bool broaden_poly;      // Whether to broaden polynomial curvefit
+    int pseudo_index_start; // Index of starting pseudopole (-1 if none)
+    int pseudo_index_end;   // Index of ending pseudopole (-1 if none)
   };
 
   // Constructors, destructors
@@ -81,6 +83,9 @@ public:
   xt::xtensor<double, 3>
     curvefit_; // Curve fit coefficients (window, poly order, reaction)
   xt::xtensor<std::complex<double>, 2> data_; //!< Poles and residues
+  xt::xtensor<std::complex<double>, 2>
+    pseudo_data_; //!< Pseudopoles and residues (e.g. angular moment fits)
+  bool has_pseudo_data_ {false}; //!< Whether pseudo_data_ was present
 
   // Constant data
   static constexpr int MAX_POLY_COEFFICIENTS =
