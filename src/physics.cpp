@@ -768,15 +768,23 @@ void elastic_scatter(int i_nuclide, const Reaction& rx, double kT, Particle& p)
   // Find speed of neutron in CM
   vel = v_n.norm();
 
-  // Sample scattering angle, checking if angle distribution is present (assume
-  // isotropic otherwise)
+  // Sample scattering angle. If windowed multipole pseudopole (Legendre
+  // moment) data is available and covers this energy, sample from the
+  // Doppler-broadened Legendre expansion. Otherwise, fall back to the
+  // tabular angle distribution, checking if it is present (assume isotropic
+  // otherwise).
   double mu_cm;
-  auto& d = rx.products_[0].distribution_[0];
-  auto d_ = dynamic_cast<UncorrelatedAngleEnergy*>(d.get());
-  if (!d_->angle().empty()) {
-    mu_cm = d_->angle().sample(p.E(), p.current_seed());
+  if (nuc->multipole_ && nuc->multipole_->has_pseudo_data_ &&
+      multipole_in_range(*nuc, p.E())) {
+    mu_cm = nuc->multipole_->sample_angle(p.E(), p.sqrtkT(), p.current_seed());
   } else {
-    mu_cm = uniform_distribution(-1., 1., p.current_seed());
+    auto& d = rx.products_[0].distribution_[0];
+    auto d_ = dynamic_cast<UncorrelatedAngleEnergy*>(d.get());
+    if (!d_->angle().empty()) {
+      mu_cm = d_->angle().sample(p.E(), p.current_seed());
+    } else {
+      mu_cm = uniform_distribution(-1., 1., p.current_seed());
+    }
   }
 
   // Determine direction cosines in CM

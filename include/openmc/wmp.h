@@ -5,6 +5,7 @@
 #include "xtensor/xtensor.hpp"
 
 #include <complex>
+#include <cstdint>
 #include <string>
 #include <tuple>
 
@@ -82,6 +83,16 @@ public:
   //! \return Vector of Legendre moment values, one per residue channel in
   //!         pseudo_data_. Empty if this nuclide has no pseudopole data.
   vector<double> evaluate_pseudo(double E, double sqrtkT) const;
+
+  //! \brief Sample a scattering cosine from the Doppler-broadened Legendre
+  //! moments computed by evaluate_pseudo().
+  //!
+  //! \param E Incident neutron energy in [eV]
+  //! \param sqrtkT Square root of temperature times Boltzmann constant
+  //! \param seed Pseudorandom number generator seed
+  //! \return Sampled scattering cosine in [-1, 1]. Isotropic if this
+  //!         nuclide/window has no pseudopole data.
+  double sample_angle(double E, double sqrtkT, uint64_t* seed) const;
 
   // Data members
   std::string name_;               //!< Name of nuclide

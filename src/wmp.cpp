@@ -2,10 +2,12 @@
 
 #include "openmc/constants.h"
 #include "openmc/cross_sections.h"
+#include "openmc/distribution_angle_analytic.h"
 #include "openmc/error.h" // for writing messages
 #include "openmc/hdf5_interface.h"
 #include "openmc/math_functions.h"
 #include "openmc/nuclide.h"
+#include "openmc/random_lcg.h"
 
 #include <fmt/core.h>
 
@@ -238,6 +240,28 @@ vector<double> WindowedMultipole::evaluate_pseudo(double E, double sqrtkT) const
   }
 
   return moments;
+}
+
+double WindowedMultipole::sample_angle(
+  double E, double sqrtkT, uint64_t* seed) const
+{
+  vector<double> moments = evaluate_pseudo(E, sqrtkT);
+
+  // No pseudopole data for this nuclide, or none in this window: fall back
+  // to isotropic scattering.
+  if (moments.empty() || moments[0] <= 0.0) {
+    return 2.0 * prn(seed) - 1.0;
+  }
+
+  // Normalize so that a_0 = 1, matching the convention expected by
+  // AngleDistributionAnalytic / evaluate_legendre.
+  vector<double> a(moments.size());
+  for (std::size_t i = 0; i < moments.size(); ++i) {
+    a[i] = moments[i] / moments[0];
+  }
+
+  AngleDistributionAnalytic dist(a);
+  return dist.sample_from_legendre(seed);
 }
 
 std::tuple<double, double, double> WindowedMultipole::evaluate_deriv(
