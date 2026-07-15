@@ -25,6 +25,60 @@ WindowedMultipole::WindowedMultipole(hid_t group)
   // Get name of nuclide from group, removing leading '/'
   name_ = object_name(group).substr(1);
 
+  // Global pole table format (AAA-fit libraries): detected by its window
+  // pointer datasets. Layout: poles[n_pool] (complex, stored once),
+  // residues[n_pool, n_ch] (global, one column per channel), windows are
+  // contiguous ranges poles[win_pole_start[w]:win_pole_end[w]] with
+  // NON-uniform sqrt(E) boundaries in sqrtE_bounds[n_win+1], plus
+  // ext_poles[n_win, n_ext] / ext_residues[n_win, n_ext, n_ch] owned
+  // per-window. Channel order (writer convention): scattering, absorption,
+  // then elastic Legendre moments sigma_l.
+  if (object_exists(group, "win_pole_start")) {
+    global_format_ = true;
+
+    double awr;
+    read_attribute(group, "AWR", awr);
+    sqrt_awr_ = std::sqrt(awr);
+    read_attribute(group, "E_min", E_min_);
+    read_attribute(group, "E_max", E_max_);
+
+    read_dataset(group, "poles", poles_);
+    read_dataset(group, "residues", residues_);
+    read_dataset(group, "ext_poles", ext_poles_);
+    read_dataset(group, "ext_residues", ext_residues_);
+    n_channels_ = residues_.shape()[1];
+
+    xt::xtensor<double, 1> bounds;
+    read_dataset(group, "sqrtE_bounds", bounds);
+    sqrtE_bounds_.assign(bounds.begin(), bounds.end());
+
+    xt::xtensor<int, 1> win_start, win_end;
+    read_dataset(group, "win_pole_start", win_start);
+    read_dataset(group, "win_pole_end", win_end);
+    int n_windows = win_start.shape()[0];
+    if (sqrtE_bounds_.size() != static_cast<size_t>(n_windows) + 1 ||
+        ext_poles_.shape()[0] != static_cast<size_t>(n_windows)) {
+      fatal_error("Global-format WMP library for " + name_ +
+                  " has inconsistent window array shapes.");
+    }
+    window_info_.resize(n_windows);
+    for (int i = 0; i < n_windows; ++i) {
+      window_info_[i].index_start = win_start(i);       // already 0-based
+      window_info_[i].index_end = win_end(i) - 1;       // end is exclusive
+      window_info_[i].broaden_poly = false;             // no curvefit
+      window_info_[i].pseudo_index_start = -1;
+      window_info_[i].pseudo_index_end = -1;
+    }
+
+    fissionable_ = false;
+    fit_order_ = -1;                        // no curvefit terms
+    // Moment channels beyond [scattering, absorption] drive angle sampling
+    // through the same evaluate_pseudo()/sample_angle() path as the
+    // pseudopole format.
+    has_pseudo_data_ = (n_channels_ > 2);
+    return;
+  }
+
   // Read scalar values.
   read_dataset(group, "spacing", inv_spacing_);
   inv_spacing_ = 1.0 / inv_spacing_;
@@ -105,10 +159,83 @@ WindowedMultipole::WindowedMultipole(hid_t group)
   }
 }
 
+int WindowedMultipole::find_window(double sqrtE) const
+{
+  auto it =
+    std::upper_bound(sqrtE_bounds_.begin(), sqrtE_bounds_.end(), sqrtE);
+  int i = static_cast<int>(it - sqrtE_bounds_.begin()) - 1;
+  return std::min(std::max(i, 0),
+    static_cast<int>(window_info_.size()) - 1);
+}
+
+void WindowedMultipole::evaluate_global(
+  double E, double sqrtkT, double* xs) const
+{
+  using namespace std::complex_literals;
+
+  double sqrtE = std::sqrt(E);
+  double invE = 1.0 / E;
+  int i_window = find_window(sqrtE);
+  const auto& window {window_info_[i_window]};
+  int n_ext = ext_poles_.shape()[1];
+
+  for (int c = 0; c < n_channels_; ++c)
+    xs[c] = 0.0;
+
+  if (sqrtkT == 0.0) {
+    // 0K: plain pole sum, sigma_ch = Re[r / (sqrt(E) - p)]
+    auto add_pole = [&](std::complex<double> p, auto residue) {
+      std::complex<double> c_temp = 1.0 / (sqrtE - p);
+      for (int c = 0; c < n_channels_; ++c)
+        xs[c] += (residue(c) * c_temp).real();
+    };
+    for (int j = window.index_start; j <= window.index_end; ++j) {
+      add_pole(poles_(j), [&](int c) { return residues_(j, c); });
+    }
+    for (int k = 0; k < n_ext; ++k) {
+      add_pole(ext_poles_(i_window, k),
+        [&](int c) { return ext_residues_(i_window, k, c); });
+    }
+  } else {
+    // T>0: analytic Faddeeva broadening,
+    //   sigma_T(E) = (1/E) Re[ r*(u+p) + r*p^2*(i sqrt(pi) dopp)*w((p-u)*dopp) ]
+    // with u = sqrt(E), dopp = 1/xi = sqrt(AWR)/sqrtkT. The 1/v pole
+    // (Re p == 0) is exactly invariant under free-gas broadening and is
+    // evaluated unbroadened. NOTE: the low-energy image-kernel correction
+    // (only relevant below u < 4.5 xi, ~20 meV at 3000 K) is not applied.
+    double dopp = sqrt_awr_ / sqrtkT;
+    auto add_pole = [&](std::complex<double> p, auto residue) {
+      std::complex<double> base;
+      if (std::abs(p.real()) < 1e-12) {
+        base = E / (sqrtE - p); // unbroadened, pre-multiplied by E
+      } else {
+        std::complex<double> w_val = faddeeva((p - sqrtE) * dopp);
+        base = (sqrtE + p) + p * p * (1.0i * SQRT_PI * dopp) * w_val;
+      }
+      base *= invE;
+      for (int c = 0; c < n_channels_; ++c)
+        xs[c] += (residue(c) * base).real();
+    };
+    for (int j = window.index_start; j <= window.index_end; ++j) {
+      add_pole(poles_(j), [&](int c) { return residues_(j, c); });
+    }
+    for (int k = 0; k < n_ext; ++k) {
+      add_pole(ext_poles_(i_window, k),
+        [&](int c) { return ext_residues_(i_window, k, c); });
+    }
+  }
+}
+
 std::tuple<double, double, double> WindowedMultipole::evaluate(
   double E, double sqrtkT) const
 {
   using namespace std::complex_literals;
+
+  if (global_format_) {
+    vector<double> xs(n_channels_);
+    evaluate_global(E, sqrtkT, xs.data());
+    return std::make_tuple(xs[0], xs[1], 0.0);
+  }
 
   // ==========================================================================
   // Bookkeeping
@@ -199,6 +326,20 @@ vector<double> WindowedMultipole::evaluate_pseudo(double E, double sqrtkT) const
   if (!has_pseudo_data_)
     return {};
 
+  // Global format: the moments are residue columns [2..] on the same poles.
+  // Return [sigma_0, sigma_1, sigma_2, ...] so that sample_angle()'s
+  // normalization a_l = moments[l]/moments[0] yields the Legendre
+  // coefficients (channel 0 is the elastic cross section sigma_0).
+  if (global_format_) {
+    vector<double> xs(n_channels_);
+    evaluate_global(E, sqrtkT, xs.data());
+    vector<double> moments(n_channels_ - 1);
+    moments[0] = xs[0]; // sigma_0 = elastic scattering
+    for (int c = 2; c < n_channels_; ++c)
+      moments[c - 1] = xs[c];
+    return moments;
+  }
+
   // Define some frequently used variables.
   double sqrtE = std::sqrt(E);
   double invE = 1.0 / E;
@@ -267,6 +408,11 @@ double WindowedMultipole::sample_angle(
 std::tuple<double, double, double> WindowedMultipole::evaluate_deriv(
   double E, double sqrtkT) const
 {
+  if (global_format_) {
+    fatal_error("Windowed multipole temperature derivatives are not "
+                "implemented for global-pole-table format libraries.");
+  }
+
   // ==========================================================================
   // Bookkeeping
 

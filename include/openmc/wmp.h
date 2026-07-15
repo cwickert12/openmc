@@ -94,6 +94,26 @@ public:
   //!         nuclide/window has no pseudopole data.
   double sample_angle(double E, double sqrtkT, uint64_t* seed) const;
 
+  //! \brief Evaluate every channel of a global-pole-table format library
+  //!
+  //! Global format (AAA-fit libraries): sigma_ch(E) = sum_j Re[r_j /
+  //! (sqrt(E) - p_j)] over the window's pool pointer range plus its own
+  //! external poles. Channels are the residue columns: [0] elastic
+  //! scattering, [1] absorption, [2..] elastic Legendre moments sigma_l.
+  //! At T>0 the analytic Faddeeva broadening is applied identically to
+  //! every channel; poles with Re(p) == 0 (the 1/v pole) are evaluated
+  //! unbroadened (a 1/v cross section is exactly invariant under free-gas
+  //! broadening). The low-energy image-kernel correction is NOT
+  //! implemented (matters only below ~u < 4.5 xi, i.e. ~20 meV at 3000 K).
+  //!
+  //! \param E Incident neutron energy in [eV]
+  //! \param sqrtkT Square root of temperature times Boltzmann constant
+  //! \param xs Output array of n_channels_ channel values in [b]
+  void evaluate_global(double E, double sqrtkT, double* xs) const;
+
+  //! Binary-search window lookup for non-uniform (global format) windows
+  int find_window(double sqrtE) const;
+
   // Data members
   std::string name_;               //!< Name of nuclide
   double E_min_;                   //!< Minimum energy in [eV]
@@ -109,6 +129,22 @@ public:
   xt::xtensor<std::complex<double>, 2>
     pseudo_data_; //!< Pseudopoles and residues (e.g. angular moment fits)
   bool has_pseudo_data_ {false}; //!< Whether pseudo_data_ was present
+
+  // Global pole table format (AAA-fit libraries, e.g. Cu63_wmp_global.h5):
+  // poles stored once in one alpha-sorted table; windows are contiguous
+  // pointer ranges into it (non-uniform in sqrt(E), hence sqrtE_bounds_);
+  // each window additionally owns external poles with per-window residues
+  // (the curvefit replacement). Residue columns are channels in writer
+  // order: [scattering, absorption, sigma_1, sigma_2, ...]. Assumes a
+  // non-fissionable nuclide (no fission column).
+  bool global_format_ {false};   //!< File uses the global pole table layout
+  int n_channels_ {0};           //!< Number of residue columns
+  vector<double> sqrtE_bounds_;  //!< Window boundaries in sqrt(E) [n_win+1]
+  xt::xtensor<std::complex<double>, 1> poles_;    //!< Pool poles [n_pool]
+  xt::xtensor<std::complex<double>, 2> residues_; //!< [n_pool, n_channels]
+  xt::xtensor<std::complex<double>, 2> ext_poles_; //!< [n_win, n_ext]
+  xt::xtensor<std::complex<double>, 3>
+    ext_residues_; //!< [n_win, n_ext, n_channels]
 
   // Constant data
   static constexpr int MAX_POLY_COEFFICIENTS =
