@@ -12,6 +12,7 @@
 #include <fmt/core.h>
 
 #include <algorithm> // for min
+#include <cstdlib>   // for getenv
 #include <cmath>
 
 namespace openmc {
@@ -386,7 +387,18 @@ vector<double> WindowedMultipole::evaluate_pseudo(double E, double sqrtkT) const
 double WindowedMultipole::sample_angle(
   double E, double sqrtkT, uint64_t* seed) const
 {
-  vector<double> moments = evaluate_pseudo(E, sqrtkT);
+  // Experiment mode (env OPENMC_WMP_ANGLE_0K): sample scattering angles
+  // from UNBROADENED (0 K) Legendre moments while cross sections remain
+  // Doppler broadened -- mimics standard production libraries, where
+  // BROADR broadens File 3 but File 4 angular data is never broadened.
+  static const bool angle_0k = [] {
+    bool on = std::getenv("OPENMC_WMP_ANGLE_0K") != nullptr;
+    if (on)
+      warning("WMP angle sampling forced to 0 K moments "
+              "(OPENMC_WMP_ANGLE_0K set); cross sections remain broadened.");
+    return on;
+  }();
+  vector<double> moments = evaluate_pseudo(E, angle_0k ? 0.0 : sqrtkT);
 
   // No pseudopole data for this nuclide, or none in this window: fall back
   // to isotropic scattering.
