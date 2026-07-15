@@ -149,7 +149,9 @@ double AngleDistribution::sample(double E, uint64_t* seed) const
   auto n = energy_.size();
   double mu = 0.0;
 
-  if (E > energy_coeff_[n_energy_coeff_-1]){
+  // Tabulated path when no Legendre-coefficient table was loaded (standard
+  // data files) or when E is above the coefficient table's range.
+  if (n_energy_coeff_ == 0 || E > energy_coeff_[n_energy_coeff_-1]){
     // Find energy bin and calculate interpolation factor -- if the energy is
     // outside the range of the tabulated energies, choose the first or last bins
     int i;
