@@ -8,7 +8,9 @@ namespace openmc {
 
 //! Samples a scattering cosine from a normalized Legendre moment expansion
 //! f(mu) = sum_l (l+0.5) * a_l * P_l(mu), where a_0 = 1. Supports arbitrary
-//! order via rejection sampling with a numerically-scanned envelope.
+//! order via rejection sampling with a numerically-scanned envelope. For
+//! l==2 expansions, env OPENMC_WMP_MODIFIED_MOMENT switches to a closed-form
+//! CDF inversion instead, whenever that inversion is valid.
 class AngleDistributionAnalytic {
 public:
   // Constructor: normalized Legendre moments a_l (a_0 = 1, without the
