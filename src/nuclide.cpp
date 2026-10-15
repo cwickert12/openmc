@@ -622,6 +622,7 @@ void Nuclide::calculate_xs(
   micro.elastic = CACHE_INVALID;
   micro.thermal = 0.0;
   micro.thermal_elastic = 0.0;
+  micro.n_wmp_moments = 0;
 
   // Check to see if there is multipole data present at this energy
   bool use_mp = false;
@@ -633,7 +634,9 @@ void Nuclide::calculate_xs(
   if (use_mp) {
     // Call multipole kernel
     double sig_s, sig_a, sig_f;
-    std::tie(sig_s, sig_a, sig_f) = multipole_->evaluate(p.E(), p.sqrtkT());
+    std::tie(sig_s, sig_a, sig_f) =
+      multipole_->evaluate(p.E(), p.sqrtkT(), micro.wmp_moments,
+        WMP_MAX_CACHED_MOMENTS, micro.n_wmp_moments);
 
     micro.total = sig_s + sig_a;
     micro.elastic = sig_s;

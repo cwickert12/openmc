@@ -243,6 +243,11 @@ enum ReactionType {
 
 constexpr array<int, 6> DEPLETION_RX {N_GAMMA, N_P, N_A, N_2N, N_3N, N_4N};
 
+// Largest Legendre expansion [sigma_0 .. sigma_L] cached per nuclide from a
+// windowed multipole evaluation (L <= 5).  Libraries with more moment channels
+// still work: their angles fall back to re-evaluating the poles.
+constexpr int WMP_MAX_CACHED_MOMENTS {6};
+
 // Resonance elastic scattering methods
 enum class ResScatMethod {
   rvs,  // Relative velocity sampling

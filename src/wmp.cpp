@@ -233,9 +233,8 @@ std::tuple<double, double, double> WindowedMultipole::evaluate(
   using namespace std::complex_literals;
 
   if (global_format_) {
-    vector<double> xs(n_channels_);
-    evaluate_global(E, sqrtkT, xs.data());
-    return std::make_tuple(xs[0], xs[1], 0.0);
+    int n_moments;
+    return evaluate(E, sqrtkT, nullptr, 0, n_moments);
   }
 
   // ==========================================================================
@@ -384,8 +383,30 @@ vector<double> WindowedMultipole::evaluate_pseudo(double E, double sqrtkT) const
   return moments;
 }
 
-double WindowedMultipole::sample_angle(
-  double E, double sqrtkT, uint64_t* seed) const
+std::tuple<double, double, double> WindowedMultipole::evaluate(double E,
+  double sqrtkT, double* moments, int max_moments, int& n_moments) const
+{
+  n_moments = 0;
+  if (!global_format_)
+    return evaluate(E, sqrtkT);
+
+  vector<double> xs(n_channels_);
+  evaluate_global(E, sqrtkT, xs.data());
+
+  // Same layout evaluate_pseudo() returns: [sigma_0, sigma_1, ...], where
+  // sigma_0 is the elastic channel and channel 1 (absorption) is skipped.
+  int n = n_channels_ - 1;
+  if (moments && has_pseudo_data_ && n <= max_moments) {
+    moments[0] = xs[0];
+    for (int c = 2; c < n_channels_; ++c)
+      moments[c - 1] = xs[c];
+    n_moments = n;
+  }
+  return std::make_tuple(xs[0], xs[1], 0.0);
+}
+
+double WindowedMultipole::sample_angle(double E, double sqrtkT,
+  uint64_t* seed, const double* moments, int n_moments) const
 {
   // Experiment mode (env OPENMC_WMP_ANGLE_0K): sample scattering angles
   // from UNBROADENED (0 K) Legendre moments while cross sections remain
@@ -398,18 +419,25 @@ double WindowedMultipole::sample_angle(
               "(OPENMC_WMP_ANGLE_0K set); cross sections remain broadened.");
     return on;
   }();
-  vector<double> moments = evaluate_pseudo(E, angle_0k ? 0.0 : sqrtkT);
+  // Reuse moments evaluated with the cross sections when they are for the
+  // temperature wanted here; the 0 K experiment mode needs its own.
+  vector<double> evaluated;
+  if (!moments || n_moments == 0 || (angle_0k && sqrtkT != 0.0)) {
+    evaluated = evaluate_pseudo(E, angle_0k ? 0.0 : sqrtkT);
+    moments = evaluated.data();
+    n_moments = static_cast<int>(evaluated.size());
+  }
 
   // No pseudopole data for this nuclide, or none in this window: fall back
   // to isotropic scattering.
-  if (moments.empty() || moments[0] <= 0.0) {
+  if (n_moments == 0 || moments[0] <= 0.0) {
     return 2.0 * prn(seed) - 1.0;
   }
 
   // Normalize so that a_0 = 1, matching the convention expected by
   // AngleDistributionAnalytic / evaluate_legendre.
-  vector<double> a(moments.size());
-  for (std::size_t i = 0; i < moments.size(); ++i) {
+  vector<double> a(n_moments);
+  for (int i = 0; i < n_moments; ++i) {
     a[i] = moments[i] / moments[0];
   }
 

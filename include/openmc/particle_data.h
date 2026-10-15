@@ -152,6 +152,13 @@ struct NuclideMicroXS {
   double sab_frac;      //!< Fraction of atoms affected by S(a,b)
   bool use_ptable;      //!< In URR range with probability tables?
 
+  // Elastic Legendre moments [sigma_0, sigma_1, ...] from a global-format
+  // windowed multipole evaluation at (last_E, last_sqrtkT).  The pole sum
+  // that gives the cross sections gives these too, so elastic angle sampling
+  // reuses them instead of repeating it.  n_wmp_moments == 0: none cached.
+  double wmp_moments[WMP_MAX_CACHED_MOMENTS];
+  int n_wmp_moments {0};
+
   // Energy and temperature last used to evaluate these cross sections.  If
   // these values have changed, then the cross sections must be re-evaluated.
   double last_E {0.0};      //!< Last evaluated energy

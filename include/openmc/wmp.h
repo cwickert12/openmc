@@ -61,6 +61,21 @@ public:
   //! sections in [b]
   std::tuple<double, double, double> evaluate(double E, double sqrtkT) const;
 
+  //! \brief As evaluate(), also returning the elastic Legendre moments that
+  //! a global-format evaluation produces alongside the cross sections.
+  //!
+  //! \param E Incident neutron energy in [eV]
+  //! \param sqrtkT Square root of temperature times Boltzmann constant
+  //! \param moments Output [sigma_0, sigma_1, ...], identical to what
+  //!        evaluate_pseudo(E, sqrtkT) returns
+  //! \param max_moments Capacity of moments
+  //! \param n_moments Number written; 0 if the library has no moment channels,
+  //!        is not global format, or has more than max_moments of them
+  //! \return Tuple of elastic scattering, absorption, and fission cross
+  //! sections in [b]
+  std::tuple<double, double, double> evaluate(double E, double sqrtkT,
+    double* moments, int max_moments, int& n_moments) const;
+
   //! \brief Evaluates the windowed multipole equations for the derivative of
   //! cross sections in the resolved resonance regions with respect to
   //! temperature.
@@ -90,9 +105,13 @@ public:
   //! \param E Incident neutron energy in [eV]
   //! \param sqrtkT Square root of temperature times Boltzmann constant
   //! \param seed Pseudorandom number generator seed
+  //! \param moments Moments already evaluated at (E, sqrtkT), e.g. cached by
+  //!        Nuclide::calculate_xs; nullptr to evaluate them here
+  //! \param n_moments Number of entries in moments
   //! \return Sampled scattering cosine in [-1, 1]. Isotropic if this
   //!         nuclide/window has no pseudopole data.
-  double sample_angle(double E, double sqrtkT, uint64_t* seed) const;
+  double sample_angle(double E, double sqrtkT, uint64_t* seed,
+    const double* moments = nullptr, int n_moments = 0) const;
 
   //! \brief Evaluate every channel of a global-pole-table format library
   //!

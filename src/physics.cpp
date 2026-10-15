@@ -776,7 +776,13 @@ void elastic_scatter(int i_nuclide, const Reaction& rx, double kT, Particle& p)
   double mu_cm;
   if (nuc->multipole_ && nuc->multipole_->has_pseudo_data_ &&
       multipole_in_range(*nuc, p.E())) {
-    mu_cm = nuc->multipole_->sample_angle(p.E(), p.sqrtkT(), p.current_seed());
+    // Moments cached by calculate_xs, if they are for this energy/temperature
+    const auto& micro {p.neutron_xs(i_nuclide)};
+    bool cached = micro.n_wmp_moments > 0 && micro.last_E == p.E() &&
+                  micro.last_sqrtkT == p.sqrtkT();
+    mu_cm = nuc->multipole_->sample_angle(p.E(), p.sqrtkT(),
+      p.current_seed(), cached ? micro.wmp_moments : nullptr,
+      cached ? micro.n_wmp_moments : 0);
   } else {
     auto& d = rx.products_[0].distribution_[0];
     auto d_ = dynamic_cast<UncorrelatedAngleEnergy*>(d.get());
