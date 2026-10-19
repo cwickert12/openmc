@@ -169,6 +169,123 @@ int WindowedMultipole::find_window(double sqrtE) const
     static_cast<int>(window_info_.size()) - 1);
 }
 
+namespace {
+
+//! Rational approximation of the Faddeeva function w(z) for Im(z) > 0: a
+//! sixth-order shifted rational N(z + 1.5i) / D(z + 1.5i) with D even and the
+//! leading numerator coefficient pinned to i/sqrt(pi). From B. Forget, J. Yu
+//! and G. Ridley, "Direct Doppler broadening of windowed multipole cross
+//! sections with a rational approximation of the Faddeeva function," Proc.
+//! PHYSOR 2022; coefficients as fitted in B. Forget's wmp-v2 OpenMC branch over
+//! |Re z| <= 600, 1e-4 <= Im z <= 1200 (max relative error 1.6e-5). Only
+//! called here for |z| < FAR_Z, well inside that domain.
+inline void faddeeva_rational(double zr, double zi, double& wr, double& wi)
+{
+  zi += 1.5; // shift
+  double nr = 0.0, ni = 0.5641895835477563, t;
+  t = nr * zr - ni * zi - 0.8463988774687549;
+  ni = nr * zi + ni * zr;
+  nr = t;
+  t = nr * zr - ni * zi;
+  ni = nr * zi + ni * zr - 4.262789761626753;
+  nr = t;
+  t = nr * zr - ni * zi + 5.57957343594273;
+  ni = nr * zi + ni * zr;
+  nr = t;
+  t = nr * zr - ni * zi;
+  ni = nr * zi + ni * zr + 8.876835541419577;
+  nr = t;
+  t = nr * zr - ni * zi - 8.2804011586059;
+  ni = nr * zi + ni * zr;
+  nr = t;
+  double zzr = zr * zr - zi * zi, zzi = 2.0 * zr * zi;
+  double dnr = 1.0, dni = 0.0;
+  t = dnr * zzr - dni * zzi - 5.810043673216703;
+  dni = dnr * zzi + dni * zzr;
+  dnr = t;
+  t = dnr * zzr - dni * zzi + 6.844707994387722;
+  dni = dnr * zzi + dni * zzr;
+  dnr = t;
+  t = dnr * zzr - dni * zzi - 0.901452218111202;
+  dni = dnr * zzi + dni * zzr;
+  dnr = t;
+  double dm = 1.0 / (dnr * dnr + dni * dni);
+  wr = (nr * dnr + ni * dni) * dm;
+  wi = (ni * dnr - nr * dni) * dm;
+}
+
+//! Poles farther than this many Doppler widths from sqrt(E) take the
+//! asymptotic form in broadened_kernel().
+constexpr double FAR_Z = 5.0;
+
+//! Doppler-broadened kernel of one pole, already divided by E:
+//!   b = (1/E) [ (u + p) + p^2 (i sqrt(pi)/xi) w(z) ],  z = (p - u)/xi,
+//! with u = sqrt(E), returned as (br, bi) so that a channel with residue r
+//! contributes Re(r b). Written in real arithmetic: std::complex products and
+//! quotients go through NaN-checking library calls.
+//!
+//! - Re(p) == 0 (the 1/v pole) is invariant under free-gas broadening:
+//!   b = 1/(u - p).
+//! - |z| >= FAR_Z: substituting w(z) ~ i/(sqrt(pi) z) (1 + 1/(2z^2) +
+//!   3/(4z^4) + ...) analytically gives b = [1 + (p/u)^2 c] / (u - p) with
+//!   c = t/2 + 3t^2/4 + 15t^3/8 + 105t^4/16, t = 1/z^2. Evaluating the
+//!   original form with any approximate w(z) instead cancels catastrophically
+//!   for far poles (|z| reaches ~1e4 for the wide windows' external poles), and
+//!   this form needs no w(z) at all. Truncation error ~3e-6 at |z| = FAR_Z.
+//! - Otherwise w(z) comes from faddeeva_rational().
+inline void broadened_kernel(double pr, double pi, double u, double invE,
+  double inv_xi, double& br, double& bi)
+{
+  const double dr = u - pr; // u - p = dr - i pi
+  const double inv_d2 = 1.0 / (dr * dr + pi * pi);
+  if (std::abs(pr) < 1e-12) {
+    br = dr * inv_d2;
+    bi = pi * inv_d2;
+    return;
+  }
+
+  const double zr = -dr * inv_xi;
+  const double zi = pi * inv_xi;
+  const double z2r = zr * zr - zi * zi, z2i = 2.0 * zr * zi;
+  const double az2 = zr * zr + zi * zi;
+  if (az2 >= FAR_Z * FAR_Z) {
+    // t = 1/z^2, c = t (1/2 + t (3/4 + t (15/8 + t 105/16)))
+    const double inv = 1.0 / (az2 * az2);
+    const double tr = z2r * inv, ti = -z2i * inv;
+    double cr = 105.0 / 16.0, ci = 0.0, s;
+    s = cr * tr - ci * ti + 15.0 / 8.0;
+    ci = cr * ti + ci * tr;
+    cr = s;
+    s = cr * tr - ci * ti + 0.75;
+    ci = cr * ti + ci * tr;
+    cr = s;
+    s = cr * tr - ci * ti + 0.5;
+    ci = cr * ti + ci * tr;
+    cr = s;
+    s = cr * tr - ci * ti;
+    ci = cr * ti + ci * tr;
+    cr = s;
+    // num = 1 + (p^2/E) c
+    const double p2r = (pr * pr - pi * pi) * invE, p2i = 2.0 * pr * pi * invE;
+    const double nr = 1.0 + p2r * cr - p2i * ci, ni = p2r * ci + p2i * cr;
+    // b = num / (u - p) = num (dr + i pi) / |u - p|^2
+    br = (nr * dr - ni * pi) * inv_d2;
+    bi = (nr * pi + ni * dr) * inv_d2;
+    return;
+  }
+
+  double wr, wi;
+  faddeeva_rational(zr, zi, wr, wi);
+  const double sq = SQRT_PI * inv_xi;
+  const double gr = -sq * wi, gi = sq * wr; // i sqrt(pi)/xi w(z)
+  const double p2r = pr * pr - pi * pi, p2i = 2.0 * pr * pi;
+  const double hr = p2r * gr - p2i * gi, hi = p2r * gi + p2i * gr;
+  br = (u + pr + hr) * invE;
+  bi = (pi + hi) * invE;
+}
+
+} // namespace
+
 void WindowedMultipole::evaluate_global(
   double E, double sqrtkT, double* xs) const
 {
@@ -205,17 +322,38 @@ void WindowedMultipole::evaluate_global(
     // evaluated unbroadened. NOTE: the low-energy image-kernel correction
     // (only relevant below u < 4.5 xi, ~20 meV at 3000 K) is not applied.
     double dopp = sqrt_awr_ / sqrtkT;
+
+    // Experiment mode (env OPENMC_WMP_FADDEEVA_EXACT): evaluate every pole
+    // with the exact Faddeeva function instead of broadened_kernel(), for
+    // validating and timing the latter.
+    static const bool exact = [] {
+      bool on = std::getenv("OPENMC_WMP_FADDEEVA_EXACT") != nullptr;
+      if (on)
+        warning("Global-format WMP broadening uses the exact Faddeeva "
+                "function (OPENMC_WMP_FADDEEVA_EXACT set).");
+      return on;
+    }();
+
     auto add_pole = [&](std::complex<double> p, auto residue) {
-      std::complex<double> base;
-      if (std::abs(p.real()) < 1e-12) {
-        base = E / (sqrtE - p); // unbroadened, pre-multiplied by E
+      double br, bi;
+      if (exact) {
+        std::complex<double> base;
+        if (std::abs(p.real()) < 1e-12) {
+          base = E / (sqrtE - p); // unbroadened, pre-multiplied by E
+        } else {
+          std::complex<double> w_val = faddeeva((p - sqrtE) * dopp);
+          base = (sqrtE + p) + p * p * (1.0i * SQRT_PI * dopp) * w_val;
+        }
+        base *= invE;
+        br = base.real();
+        bi = base.imag();
       } else {
-        std::complex<double> w_val = faddeeva((p - sqrtE) * dopp);
-        base = (sqrtE + p) + p * p * (1.0i * SQRT_PI * dopp) * w_val;
+        broadened_kernel(p.real(), p.imag(), sqrtE, invE, dopp, br, bi);
       }
-      base *= invE;
-      for (int c = 0; c < n_channels_; ++c)
-        xs[c] += (residue(c) * base).real();
+      for (int c = 0; c < n_channels_; ++c) {
+        std::complex<double> r = residue(c);
+        xs[c] += r.real() * br - r.imag() * bi;
+      }
     };
     for (int j = window.index_start; j <= window.index_end; ++j) {
       add_pole(poles_(j), [&](int c) { return residues_(j, c); });
